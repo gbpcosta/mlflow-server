@@ -1,0 +1,116 @@
+version: '3.3'
+
+services:
+    waitfordb:
+        image: dadarek/wait-for-dependencies
+        depends_on:
+            - mlflow-db
+        command: mlflow-db:${DB_PORT}
+
+    mlflow-db:
+        restart: always
+        image: postgres:latest
+        container_name: mlflow-db
+        expose:
+            - ${DB_PORT}
+        networks:
+            - backend
+        environment:
+            - POSTGRES_DB=${DB_NAME}
+            - POSTGRES_USER=${DB_USER}
+            - POSTGRES_PASSWORD=${DB_PW}
+            - POSTGRES_INITDB_ARGS="--encoding=UTF-8"
+        volumes:
+            - db_datapg:/var/lib/postgresql/data
+        hostname: mlflow-db
+
+    mlflow:
+        restart: always
+        build: ./mlflow-server
+        image: mlflow-server
+        container_name: mlflow-server
+        depends_on:
+            - mlflow-db
+            - waitfordb
+        expose:
+            - ${MLFLOW_PORT}
+            - 443
+        networks:
+            - frontend
+            - backend
+        environment:
+            - BACKEND=postgresql+psycopg2://${DB_USER}:${DB_PW}@mlflow-db:${DB_PORT}/${DB_NAME}
+            - ARTIFACTS=/mlflow/mlruns
+            - VIRTUAL_HOST=${HOST}
+            - VIRTUAL_PORT=${MLFLOW_PORT}
+            - LETSENCRYPT_HOST=${HOST}
+            - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
+        volumes:
+            - mlrun_data:/mlflow/mlruns
+        command:
+            - sh
+            - -c
+            - mlflow server
+                --port ${MLFLOW_PORT}
+                --host 0.0.0.0
+                --backend-store-uri $${BACKEND}
+                --default-artifact-root $${ARTIFACTS}
+
+    nginx-proxy:
+        image: jwilder/nginx-proxy
+        container_name: nginx-proxy
+        restart: always
+        ports:
+            - ${MLFLOW_PORT}:${MLFLOW_PORT}
+            - 443:443
+        volumes:
+            - ./${HOST}:/etc/nginx/htpasswd/${HOST}
+            - dhparam:/etc/nginx/dhparam
+            - conf:/etc/nginx/conf.d
+            - certs:/etc/nginx/certs:ro
+            - vhost:/etc/nginx/vhost.d
+            - html:/usr/share/nginx/html
+            - /var/run/docker.sock:/tmp/docker.sock:ro
+        environment:
+            DEFAULT_HOST: ${HOST}
+            DHPARAM_GENERATION: "false"
+            HTTPS_METHOD: noredirect
+        labels:
+            - "com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy"
+        networks:
+            - frontend
+        depends_on:
+            - mlflow
+
+
+    acme-companion:
+        image:  nginxproxy/acme-companion
+        container_name: nginx-proxy-acme-companion
+        restart: always
+        depends_on:
+            - nginx-proxy
+        volumes:
+            - conf:/etc/nginx/conf.d
+            - certs:/etc/nginx/certs:rw
+            - vhost:/etc/nginx/vhost.d
+            - html:/usr/share/nginx/html
+            - /var/run/docker.sock:/var/run/docker.sock:ro
+            - acme:/etc/acme.sh
+        environment:
+            NGINX_PROXY_CONTAINER: nginx-proxy
+
+networks:
+    frontend:
+        driver: bridge
+    backend:
+        driver: bridge
+
+volumes:
+    db_datapg:
+    mlrun_data:
+    dhparam:
+    conf:
+    certs:
+    html:
+    vhost:
+    acme:
