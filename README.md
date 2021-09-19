@@ -32,6 +32,8 @@ docker-compose down
 
 ## TODOs
 
+- Include DVC for data versioning
+- Include Kubeflow for 
 - Improve artifact storage
 - Make ports more flexible (currently fixed due to `acme-companion`, including `MLFLOW_PORT` in env)
 - Add GoogleCloud and AWS setups
